@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>등차수열</title>
+  <!-- MathJax 불러오기 (LaTeX 수식 렌더링) -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+  <style>
+    body {
+      margin: 0; padding: 0;
+      font-family: sans-serif;
+      background: #fdfdfd;
+      color: #333;
+    }
+    #container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 1em;
+    }
+    h1, h2, h3 {
+      text-align: center;
+    }
+    .center {
+      text-align: center;
+    }
+    .difficulty-container, .quiz-container, .result-container {
+      display: none;
+    }
+    .energy-bar {
+      width: 100%;
+      height: 20px;
+      background: #ddd;
+      margin-bottom: 1em;
+      position: relative;
+    }
+    .energy-bar-fill {
+      background: #4caf50;
+      width: 100%;
+      height: 100%;
+      transition: width 0.2s linear;
+    }
+    .choices {
+      margin-top: 1em;
+    }
+    .choice {
+      display: block;
+      margin: 0.5em 0;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      padding: 0.5em;
+      border-radius: 5px;
+      background: #fafafa;
+    }
+    .choice:hover {
+      background: #f0f0f0;
+    }
+    #response {
+      white-space: pre-wrap;
+      background: #fafafa;
+      border: 1px solid #ddd;
+      padding: 0.5em;
+      margin-top: 1em;
+    }
+    #nameInput {
+      text-align: center;
+      margin: 1em 0;
+    }
+    input[type=text] {
+      width: 250px;
+      padding: 5px;
+      font-size: 1rem;
+    }
+    button {
+      padding: 0.5em 1em;
+      margin: 0.5em;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #livesDisplay, #scoreDisplay {
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+<div id="container">
+  <h1>등차수열</h1>
+  <!-- 첫 화면: 이름 입력 & 난이도 선택 -->
+  <div id="start-container" class="center">
+    <div>
+      <label for="userName">이름 입력:</label>
+      <div id="nameInput">
+        <input type="text" id="userName" placeholder="이름을 입력해주세요">
+      </div>
+      <h3>난이도를 선택하세요</h3>
+      <button onclick="startGame('top')">최상 (20초 제한, 문제당 20점)</button>
+      <button onclick="startGame('high')">상 (30초 제한, 문제당 15점)</button>
+      <button onclick="startGame('mid')">중 (40초 제한, 문제당 13점)</button>
+      <button onclick="startGame('low')">하 (시간 제한 없음, 문제당 10점)</button>
+    </div>
+  </div>
+
+  <!-- 퀴즈 영역 -->
+  <div id="quiz-container" class="quiz-container">
+    <!-- 전체 게임 시간 표시 -->
+    <div class="center">
+      <span>전체 진행 시간: <span id="totalTime">0</span>초</span>
+      <br/>
+      <span id="livesDisplay">남은 기회: 3</span>
+      <br/>
+      <span id="scoreDisplay">점수: 0</span>
+    </div>
+    <div class="energy-bar" id="energyBar">
+      <div class="energy-bar-fill" id="energyBarFill"></div>
+    </div>
+    <div id="questionText" class="center"></div>
+    <div class="choices" id="choicesContainer"></div>
+  </div>
+
+  <!-- 결과 화면 -->
+  <div id="result-container" class="result-container center">
+    <h2>결과</h2>
+    <p id="final-score"></p>
+    <button onclick="sendScore()">점수 전송</button>
+    <div id="response"></div>
+  </div>
+</div>
+
+<script>
+// 전송 함수
+function saveData(game, name, score, elapsedTime) {
+  const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+  const requestData = {
+      game,
+      name,
+      score: parseInt(score, 10),
+      elapsedTime: parseInt(elapsedTime, 10)
+  };
+
+  fetch(FUNCTION_URL, {
+      method: 'POST',
+      headers: {
+          'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestData)
+  })
+  .then(async (response) => {
+      const responseData = await response.json();
+      if (response.ok) {
+          document.getElementById('response').innerText =
+              `성공: ${JSON.stringify(responseData, null, 2)}`;
+      } else {
+          document.getElementById('response').innerText =
+              `오류: ${JSON.stringify(responseData, null, 2)}`;
+      }
+  })
+  .catch(error => {
+      console.error('요청 실패:', error);
+      document.getElementById('response').innerText =
+          `네트워크 오류: ${error.message}`;
+  });
+}
+
+// 모든 문제와 보기(문제의 순서·보기 순서·정답을 원문 그대로 유지)
+// 총 53개 문제를 하나도 빠짐없이 유니코드 아래첨자로 표시
+// LaTeX 내에서도 {aₙ}, a₃, a₄ 식으로 표시되도록 수정
+
+const questions = [
+  // 1) ~ 6)
+  {
+    text: `다음 수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+\\(\\dfrac{1}{3}, \\dfrac{3}{5}, \\dfrac{5}{7}, \\dfrac{7}{9}, \\dots\\)`,
+    choices: [
+      "\\(\\dfrac{2n - 1}{2n + 1}\\)",
+      "\\(\\dfrac{2n + 1}{2n - 1}\\)",
+      "\\(\\dfrac{2(n - 1)}{2(n + 1)}\\)",
+      "\\(\\dfrac{2^n - 1}{2^n + 1}\\)"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+9, 99, 999, 9999, …`,
+    choices: [
+      "\\(10^n - 1\\)",
+      "\\(10^{n-1} - 1\\)",
+      "\\(10^n + 1\\)",
+      "\\(9^n - 1\\)"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+-1, 1, -1, 1, …`,
+    choices: [
+      "\\((-1)^n\\)",
+      "\\((-1)^{n+1}\\)",
+      "\\((-1)^{2n}\\)",
+      "\\((-1)^{n-1}\\)"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+1, 4, 9, 16, …`,
+    choices: [
+      "\\(n^2\\)",
+      "\\(2^n\\)",
+      "\\(n^3\\)",
+      "\\((n+1)^2\\)"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+2, 4, 6, 8, …`,
+    choices: [
+      "\\(2n\\)",
+      "\\(2(n+1)\\)",
+      "\\(n + 2\\)",
+      "\\(2n + 1\\)"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+1, 8, 27, 64, …`,
+    choices: [
+      "\\(n^3\\)",
+      "\\(3^n\\)",
+      "\\((n+1)^3\\)",
+      "\\(n^2\\)"
+    ],
+    correct: 0
+  },
+
+  // 14) ~ 20)
+  {
+    text: `일반항이 다음과 같은 수열의 a₁과 a₅를 구하시오. 
+\\(aₙ = 3n + 5\\)`,
+    choices: [
+      "a₁ = 5, a₅ = 13",
+      "a₁ = 8, a₅ = 20",
+      "a₁ = 3, a₅ = 15",
+      "a₁ = 10, a₅ = 25"
+    ],
+    correct: 1
+  },
+  {
+    text: `일반항이 다음과 같은 수열의 a₁과 a₅를 구하시오. 
+\\(aₙ = 3n - 2\\)`,
+    choices: [
+      "a₁ = 1, a₅ = 13",
+      "a₁ = 3, a₅ = 15",
+      "a₁ = 2, a₅ = 11",
+      "a₁ = 0, a₅ = 12"
+    ],
+    correct: 0
+  },
+  {
+    text: `일반항이 다음과 같은 수열의 a₁과 a₅를 구하시오. 
+\\(aₙ = \\dfrac{3n}{2n+1}\\)`,
+    choices: [
+      "a₁ = 2, a₅ = 2",
+      "a₁ = \\dfrac{3}{2}, a₅ = \\dfrac{15}{13}",
+      "a₁ = 1, a₅ = \\dfrac{11}{15}",
+      "a₁ = 1, a₅ = \\dfrac{15}{11}"
+    ],
+    correct: 3
+  },
+  {
+    text: `일반항이 다음과 같은 수열의 a₁과 a₅를 구하시오. 
+\\(aₙ = n^2 + 1\\)`,
+    choices: [
+      "a₁ = 1, a₅ = 25",
+      "a₁ = 4, a₅ = 28",
+      "a₁ = 2, a₅ = 26",
+      "a₁ = 2, a₅ = 24"
+    ],
+    correct: 2
+  },
+  {
+    text: `일반항이 다음과 같은 수열의 a₁과 a₅를 구하시오. 
+\\(aₙ = (-1)^n + 1\\)`,
+    choices: [
+      "a₁ = 2, a₅ = 2",
+      "a₁ = 0, a₅ = 0",
+      "a₁ = 2, a₅ = 0",
+      "a₁ = 0, a₅ = 2"
+    ],
+    correct: 1
+  },
+  {
+    text: `일반항이 다음과 같은 수열의 a₁과 a₅를 구하시오. 
+\\(aₙ = 2^n\\)`,
+    choices: [
+      "a₁ = 4, a₅ = 32",
+      "a₁ = 1, a₅ = 16",
+      "a₁ = 2, a₅ = 16",
+      "a₁ = 2, a₅ = 32"
+    ],
+    correct: 3
+  },
+  {
+    text: `일반항이 다음과 같은 수열의 a₁과 a₅를 구하시오. 
+\\(aₙ = n(n+1)\\)`,
+    choices: [
+      "a₁ = 1, a₅ = 20",
+      "a₁ = 2, a₅ = 30",
+      "a₁ = 3, a₅ = 15",
+      "a₁ = 2, a₅ = 20"
+    ],
+    correct: 1
+  },
+
+  // 24) ~ 31)
+  {
+    text: `첫째항 a=32, 공차 d=-4 인 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오.`,
+    choices: [
+      "aₙ = -4n + 32",
+      "aₙ = -3n + 36",
+      "aₙ = -4n + 36",
+      "aₙ = 4n - 36"
+    ],
+    correct: 2
+  },
+  {
+    text: `첫째항 a=3, 공차 d=-2 인 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오.`,
+    choices: [
+      "aₙ = -2n + 3",
+      "aₙ = -2n + 5",
+      "aₙ = 2n + 5",
+      "aₙ = -2n - 5"
+    ],
+    correct: 1
+  },
+  {
+    text: `첫째항 a=-4, 공차 d=5 인 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오.`,
+    choices: [
+      "aₙ = 5n - 5",
+      "aₙ = 4n - 9",
+      "aₙ = -5n + 9",
+      "aₙ = 5n - 9"
+    ],
+    correct: 3
+  },
+  {
+    text: `첫째항 a=-7, 공차 d=2 인 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오.`,
+    choices: [
+      "aₙ = 2n - 9",
+      "aₙ = -2n + 7",
+      "aₙ = 2n + 7",
+      "aₙ = -7n + 2"
+    ],
+    correct: 0
+  },
+  {
+    text: `첫째항 a=4, 공차 d=2 인 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오.`,
+    choices: [
+      "aₙ = 2n - 2",
+      "aₙ = 2n + 2",
+      "aₙ = 4n + 2",
+      "aₙ = 2n + 4"
+    ],
+    correct: 1
+  },
+  {
+    text: `첫째항 a=4, 공차 d=7 인 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오.`,
+    choices: [
+      "aₙ = 4n + 7",
+      "aₙ = 7n + 4",
+      "aₙ = 7n - 3",
+      "aₙ = -7n + 4"
+    ],
+    correct: 2
+  },
+  {
+    text: `첫째항 a=2, 공차 d=3 인 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오.`,
+    choices: [
+      "aₙ = 2n + 3",
+      "aₙ = 3n + 2",
+      "aₙ = 3n - 3",
+      "aₙ = 3n - 1"
+    ],
+    correct: 3
+  },
+  {
+    text: `첫째항 a=-2, 공차 d=5 인 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오.`,
+    choices: [
+      "aₙ = 5n - 7",
+      "aₙ = -5n + 7",
+      "aₙ = 5n + 2",
+      "aₙ = -2n + 5"
+    ],
+    correct: 0
+  },
+
+  // 33) ~ 40)
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+-3, -8, -13, -18, …`,
+    choices: [
+      "aₙ = -5n - 2",
+      "aₙ = -5n + 2",
+      "aₙ = -5n + 3",
+      "aₙ = 5n + 2"
+    ],
+    correct: 1
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+4, 11, 18, 25, …`,
+    choices: [
+      "aₙ = 7n - 3",
+      "aₙ = 7n + 3",
+      "aₙ = 4n - 7",
+      "aₙ = 3n + 4"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+7, 1, -5, -11, …`,
+    choices: [
+      "aₙ = -5n + 13",
+      "aₙ = -6n + 12",
+      "aₙ = 6n - 13",
+      "aₙ = -6n + 13"
+    ],
+    correct: 3
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+1, 4, 7, 10, 13, …`,
+    choices: [
+      "aₙ = 3n + 1",
+      "aₙ = 4n - 2",
+      "aₙ = 3n - 2",
+      "aₙ = 2n + 1"
+    ],
+    correct: 2
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+-5, -3, -1, 1, …`,
+    choices: [
+      "aₙ = -2n - 5",
+      "aₙ = 2n - 7",
+      "aₙ = 2n + 5",
+      "aₙ = -5n + 2"
+    ],
+    correct: 1
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+-1, 3, 7, 11, …`,
+    choices: [
+      "aₙ = 4n - 5",
+      "aₙ = 4n + 5",
+      "aₙ = -4n - 1",
+      "aₙ = 3n - 1"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+3, 6, 9, 12, …`,
+    choices: [
+      "aₙ = 3n + 3",
+      "aₙ = 2n + 3",
+      "aₙ = 3n - 3",
+      "aₙ = 3n"
+    ],
+    correct: 3
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+-7, -4, -1, 2, 5, …`,
+    choices: [
+      "aₙ = 3n - 7",
+      "aₙ = 4n - 10",
+      "aₙ = 3n - 10",
+      "aₙ = 3n - 4"
+    ],
+    correct: 2
+  },
+
+  // 44) ~ 50)
+  {
+    text: `등차수열 \\(\\{aₙ\\}\\)의 공차 d를 구하시오. 
+a₃ = 21, a₄ = 11`,
+    choices: [
+      "-5","10","5","-10"
+    ],
+    correct: 3
+  },
+  {
+    text: `등차수열 \\(\\{aₙ\\}\\)의 공차 d를 구하시오. 
+a₁ = 5, a₆ = 40`,
+    choices: [
+      "1","5","10","-5"
+    ],
+    correct: 1
+  },
+  {
+    text: `등차수열 \\(\\{aₙ\\}\\)의 공차 d를 구하시오. 
+a₁ = 10, a₁₀ = 8`,
+    choices: [
+      "2","-2","-1","4"
+    ],
+    correct: 1
+  },
+  {
+    text: `등차수열 \\(\\{aₙ\\}\\)의 공차 d를 구하시오. 
+a₁ = -5, a₆ = -40`,
+    choices: [
+      "-8","7","-7","5"
+    ],
+    correct: 2
+  },
+  {
+    text: `등차수열 \\(\\{aₙ\\}\\)의 공차 d를 구하시오. 
+a₄ = 8, a₆ = 13`,
+    choices: [
+      "5","-5","2","10"
+    ],
+    correct: 0
+  },
+  {
+    text: `등차수열 \\(\\{aₙ\\}\\)의 공차 d를 구하시오. 
+a₁ = 5, a₇ = 23`,
+    choices: [
+      "3","4","2","-3"
+    ],
+    correct: 0
+  },
+  {
+    text: `등차수열 \\(\\{aₙ\\}\\)의 첫 네 항이 
+6, 2, -2, -6, … 일 때, 이 수열의 공차 d를 구하시오.`,
+    choices: [
+      "-2","4","-4","2"
+    ],
+    correct: 2
+  },
+
+  // 52), 53)
+  {
+    text: `다음을 만족하는 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+a₅ = 21, a₁₂ = -7`,
+    choices: [
+      "aₙ = -3n + 41",
+      "aₙ = -4n + 41",
+      "aₙ = 4n - 41",
+      "aₙ = -4n + 40"
+    ],
+    correct: 1
+  },
+  {
+    text: `다음을 만족하는 등차수열 \\(\\{aₙ\\}\\)의 일반항 \\(aₙ\\)을 구하시오. 
+a₄ = -2, a₉ = 23`,
+    choices: [
+      "aₙ = 5n - 20",
+      "aₙ = 5n + 22",
+      "aₙ = 5n - 22",
+      "aₙ = -5n + 22"
+    ],
+    correct: 2
+  },
+
+  // 61), 62)
+  {
+    text: `수열 \\(\\{aₙ\\}\\)이 등차수열일 때, 
+a₃ + a₇ = 24, a₁₄ + a₁₈ = 68 일 때, a₉의 값을 구하시오.`,
+    choices: [
+      "18","20","22","24"
+    ],
+    correct: 1
+  },
+  {
+    text: `수열 \\(\\{aₙ\\}\\)이 등차수열일 때, 
+a₂ = 4a₁, a₄ + a₆ = 46 일 때, a₁₀의 값을 구하시오.`,
+    choices: [
+      "52","54","56","60"
+    ],
+    correct: 2
+  },
+
+  // 73) ~ 76)
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 양수가 되는 항은 제 몇 항인지 구하시오.
+(a₃ = -35, a₁₅ = 49)`,
+    choices: [
+      "7번째 항","9번째 항","8번째 항","10번째 항"
+    ],
+    correct: 1
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 양수가 되는 항은 제 몇 항인지 구하시오.
+(a₄ = -34, a₆ = -26)`,
+    choices: [
+      "11번째 항","12번째 항","13번째 항","14번째 항"
+    ],
+    correct: 2
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 양수가 되는 항은 제 몇 항인지 구하시오.
+수열: -51, -47, -43, -39, …`,
+    choices: [
+      "14번째 항","13번째 항","15번째 항","16번째 항"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 양수가 되는 항은 제 몇 항인지 구하시오.
+(aₙ = 3n - 26)`,
+    choices: [
+      "8번째 항","9번째 항","7번째 항","10번째 항"
+    ],
+    correct: 1
+  },
+
+  // 77) ~ 81)
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 음수가 되는 항은 제 몇 항인지 구하시오.
+(aₙ = -6n + 40)`,
+    choices: [
+      "6번째 항","8번째 항","7번째 항","9번째 항"
+    ],
+    correct: 2
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 음수가 되는 항은 제 몇 항인지 구하시오.
+(a₆ = 25, a₂₃ = -11)`,
+    choices: [
+      "17번째 항","18번째 항","20번째 항","16번째 항"
+    ],
+    correct: 1
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 음수가 되는 항은 제 몇 항인지 구하시오.
+(a₃ = 52, a₇ = 32)`,
+    choices: [
+      "14번째 항","15번째 항","13번째 항","12번째 항"
+    ],
+    correct: 0
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 음수가 되는 항은 제 몇 항인지 구하시오.
+수열: 39, 35, 31, 27, …`,
+    choices: [
+      "10번째 항","11번째 항","12번째 항","13번째 항"
+    ],
+    correct: 1
+  },
+  {
+    text: `다음 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 음수가 되는 항은 제 몇 항인지 구하시오.
+수열: 72, 68, 64, 60, …`,
+    choices: [
+      "19번째 항","20번째 항","21번째 항","18번째 항"
+    ],
+    correct: 1
+  },
+
+  // 82) ~ 85)
+  {
+    text: `두 수 18과 38 사이에 세 수 x, y, z를 넣어 전부 등차수열을 이루도록 할 때, x+y+z의 값을 구하시오.`,
+    choices: [
+      "80","88","90","84"
+    ],
+    correct: 3
+  },
+  {
+    text: `\\(a₃ = 15,\\; a₇ = 31\\)인 등차수열 \\(\\{aₙ\\}\\)에서 처음으로 100을 넘는 항은 제 몇 항인지 구하시오.`,
+    choices: [
+      "27번째 항","26번째 항","24번째 항","25번째 항"
+    ],
+    correct: 3
+  },
+  {
+    text: `두 수 \\(\\dfrac{3}{2},\\; -2\\) 사이에 6개의 수를 넣어 등차수열을 만들려고 한다. 이때 공차 d를 구하시오.`,
+    choices: [
+      "\\(-\\dfrac{1}{2}\\)",
+      "\\(\\dfrac{1}{2}\\)",
+      "-2",
+      "2"
+    ],
+    correct: 0
+  },
+  {
+    text: `두 수 3, 31 사이에 13개의 수를 넣어 등차수열을 만들려고 한다. 이때 공차 d를 구하시오.`,
+    choices: [
+      "3","2","-2","4"
+    ],
+    correct: 1
+  }
+];
+
+// 난이도별 설정
+let difficultyTime = {
+  top: 20,
+  high: 30,
+  mid: 40,
+  low: 999999 // 사실상 시간무제한
+};
+let difficultyScore = {
+  top: 20,
+  high: 15,
+  mid: 13,
+  low: 10
+};
+
+let currentDifficulty = 'low';
+let questionsOrder = [];    
+let currentQuestionIndex = 0; 
+let score = 0;
+let lives = 3;
+let totalSeconds = 0;  
+let intervalId = null;  
+let questionTimerId = null; 
+let timeLeft = 0;  
+let userName = '';
+
+function shuffleArray(arr) {
+  for(let i=arr.length-1; i>0; i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function startGame(diff) {
+  userName = document.getElementById('userName').value.trim();
+  if(!userName && diff !== 'low'){
+    alert("이름을 입력하세요.");
+    return;
+  }
+  currentDifficulty = diff;
+  document.getElementById('start-container').style.display = 'none';
+  document.getElementById('quiz-container').style.display = 'block';
+
+  intervalId = setInterval(()=>{
+    totalSeconds++;
+    document.getElementById('totalTime').innerText = totalSeconds;
+  },1000);
+
+  questionsOrder = [...Array(questions.length).keys()];
+  shuffleArray(questionsOrder);
+
+  lives = 3;
+  score = 0;
+  currentQuestionIndex = 0;
+  updateLivesDisplay();
+  updateScoreDisplay();
+
+  loadQuestion();
+}
+
+function loadQuestion() {
+  if(currentQuestionIndex >= questionsOrder.length){
+    endGame();
+    return;
+  }
+  const qIndex = questionsOrder[currentQuestionIndex];
+  const qData = questions[qIndex];
+
+  const limit = difficultyTime[currentDifficulty];
+  if(currentDifficulty === 'low'){
+    document.getElementById('energyBar').style.display = 'none';
+  } else {
+    document.getElementById('energyBar').style.display = 'block';
+  }
+  timeLeft = limit;
+  updateEnergyBar();
+
+  if(questionTimerId) clearInterval(questionTimerId);
+  if(currentDifficulty !== 'low'){
+    questionTimerId = setInterval(()=>{
+      timeLeft--;
+      updateEnergyBar();
+      if(timeLeft <= 0){
+        clearInterval(questionTimerId);
+        loseChanceByTime();
+      }
+    }, 1000);
+  }
+
+  const qElem = document.getElementById('questionText');
+  qElem.innerHTML = `<p>${qData.text}</p>`;
+
+  const cContainer = document.getElementById('choicesContainer');
+  cContainer.innerHTML = "";
+
+  let cIndices = [0,1,2,3];
+  shuffleArray(cIndices);
+
+  cIndices.forEach((idx)=>{
+    const choiceDiv = document.createElement('div');
+    choiceDiv.className = 'choice';
+    choiceDiv.innerHTML = qData.choices[idx];
+    choiceDiv.addEventListener('click', ()=>checkAnswer(idx));
+    cContainer.appendChild(choiceDiv);
+  });
+
+  MathJax.typeset();
+}
+
+function checkAnswer(choiceIndex){
+  const qIndex = questionsOrder[currentQuestionIndex];
+  const qData = questions[qIndex];
+
+  let cDivs = [...document.getElementById('choicesContainer').children];
+  const correctText = qData.choices[qData.correct];
+  const clickedText = cDivs[choiceIndex].innerHTML;
+
+  if(clickedText === correctText){
+    score += difficultyScore[currentDifficulty];
+    updateScoreDisplay();
+    alert("정답입니다!");
+  } else {
+    alert("틀렸습니다. 정답: " + correctText);
+    lives--;
+    updateLivesDisplay();
+    if(lives <= 0){
+      endGame();
+      return;
+    }
+  }
+
+  currentQuestionIndex++;
+  if(currentQuestionIndex >= questionsOrder.length){
+    endGame();
+  } else {
+    loadQuestion();
+  }
+}
+
+function loseChanceByTime(){
+  alert("시간이 초과되었습니다! 기회 1 감소");
+  lives--;
+  updateLivesDisplay();
+  if(lives <= 0){
+    endGame();
+    return;
+  }
+  currentQuestionIndex++;
+  if(currentQuestionIndex >= questionsOrder.length){
+    endGame();
+  } else {
+    loadQuestion();
+  }
+}
+
+function updateEnergyBar(){
+  const barFill = document.getElementById('energyBarFill');
+  const limit = difficultyTime[currentDifficulty];
+  let percent = 100;
+  if(limit !== 999999){
+    percent = (timeLeft / limit) * 100;
+  }
+  barFill.style.width = percent + "%";
+}
+
+function updateLivesDisplay(){
+  document.getElementById('livesDisplay').innerText = "남은 기회: " + lives;
+}
+
+function updateScoreDisplay(){
+  document.getElementById('scoreDisplay').innerText = "점수: " + score;
+}
+
+function endGame(){
+  if(intervalId) clearInterval(intervalId);
+  if(questionTimerId) clearInterval(questionTimerId);
+
+  document.getElementById('quiz-container').style.display = 'none';
+  document.getElementById('result-container').style.display = 'block';
+  document.getElementById('final-score').innerText = 
+    `게임 종료! 최종 점수: ${score}, 총 소요 시간: ${totalSeconds}초`;
+}
+
+function sendScore(){
+  saveData("등차수열", userName, score, totalSeconds);
+}
+</script>
+</body>
+</html>
